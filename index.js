@@ -1,75 +1,131 @@
 // index.js
-// Запуск приложения на Express.
-// 1. Отдаём статические файлы из /public
-// 2. POST /api/addLink - добавляем ссылку
-// 3. GET /share/:shortId - редирект
+// Демонстрация всех методов MyShortener:
+// - addLink
+// - getLongLink
+// - removeLink
+// - updateLink
+// - listAllLinks
+//
+// Допустим, myshortener.js лежит рядом в той же папке.
 
-const express = require('express');
-const path = require('path');
-const OwnLink = require('./ownlink');
+const MyShortener = require('./myshortener');
 
-const app = express();
-
-// Инициализируем класс OwnLink
-// В allowedDomain укажем 'localhost:3000', чтобы сокращать только ссылки на localhost:3000
-// Если не нужно ограничение домена, можно поставить null
-const shortener = new OwnLink({
+// Создаём экземпляр класса
+// (Если не передаём existingApp, внутри конструктора создастся свой express())
+const shortener = new MyShortener({
+  port: 3000,
   dataDir: './data',
   fileName: 'links.json',
-  allowedDomain: 'localhost:3000' 
+  publicDir: './public',        // Если хотим отдавать index.html и т.п.
+  allowedDomain: null,          // Если хотим разрешать любые ссылки, ставим null
+  basePath: '/share',           // короткие ссылки будут /share/:shortId
+  addLinkRoute: '/api/addLink', // POST для добавления ссылок
+  addLinkField: 'longLink',     // Поле, из которого берем URL
+  autoListen: false             // Не запускаем app.listen внутри класса автоматически
 });
 
-// Парсим JSON-тело
-app.use(express.json());
+// Получаем доступ к тому же экземпляру express(), что хранится в shortener.app
+// (Внутри MyShortener, если existingApp=null, создаётся this.app = express())
+const app = shortener.app;
 
-// Отдаём папку public как статическую
-// Это нужно, чтобы http://localhost:3000/index.html открылось нормально
-app.use(express.static(path.join(__dirname, 'public')));
+// --------------------------
+// Демонстрационные роуты
+// --------------------------
 
-// POST /api/addLink
-// Ожидает в body JSON: { "longLink": "http://localhost:3000/any-page" }
-app.post('/api/addLink', (req, res) => {
+/**
+ * GET /demoAdd?url=...
+ * Пример: /demoAdd?url=http://localhost:3000/page1
+ * Вызывает shortener.addLink(url), возвращает shortId
+ */
+app.get('/demoAdd', (req, res) => {
+  const { url } = req.query;
+  if (!url) {
+    return res.status(400).send('Please provide ?url=');
+  }
   try {
-    const { longLink } = req.body;
-    if (!longLink) {
-      return res.status(400).json({ success: false, error: 'longLink is required' });
-    }
-
-    // Добавляем ссылку
-    const shortId = shortener.addLink(longLink);
-
-    // Формируем финальный короткий URL вида http://localhost:3000/share/xxx
-    const shortUrl = `http://localhost:3000/share/${shortId}`;
-
-    return res.json({
-      success: true,
-      shortId,
-      shortUrl
-    });
-  } catch (err) {
-    return res.status(400).json({
-      success: false,
-      error: err.message
-    });
+    const shortId = shortener.addLink(url);
+    res.send(`Added link "${url}", shortId = "${shortId}"`);
+  } catch (error) {
+    res.status(400).send(`Error: ${error.message}`);
   }
 });
 
-// GET /share/:shortId
-// Редиректим на исходную ссылку, если она есть
-app.get('/share/:shortId', (req, res) => {
-  const shortId = req.params.shortId;
+/**
+ * GET /demoGet?shortId=xxx
+ * Пример: /demoGet?shortId=abc123
+ * Вызывает shortener.getLongLink(shortId), возвращает исходную ссылку
+ */
+app.get('/demoGet', (req, res) => {
+  const { shortId } = req.query;
+  if (!shortId) {
+    return res.status(400).send('Please provide ?shortId=');
+  }
   const longLink = shortener.getLongLink(shortId);
+  if (!longLink) {
+    return res.send(`No link found for shortId="${shortId}"`);
+  }
+  res.send(`shortId="${shortId}" -> ${longLink}`);
+});
 
-  if (longLink) {
-    // 301 или 302
-    return res.redirect(301, longLink);
+/**
+ * GET /demoRemove?shortId=xxx
+ * Пример: /demoRemove?shortId=abc123
+ * Вызывает shortener.removeLink(shortId), удаляет ссылку
+ */
+app.get('/demoRemove', (req, res) => {
+  const { shortId } = req.query;
+  if (!shortId) {
+    return res.status(400).send('Please provide ?shortId=');
+  }
+  const removed = shortener.removeLink(shortId);
+  if (removed) {
+    res.send(`Removed shortId="${shortId}" from storage.`);
   } else {
-    return res.status(404).send('Short link not found');
+    res.send(`No link to remove. shortId="${shortId}" not found.`);
   }
 });
 
+/**
+ * GET /demoUpdate?shortId=xxx&newLink=...
+ * Пример: /demoUpdate?shortId=abc123&newLink=http://localhost:3000/updated
+ * Вызывает shortener.updateLink(shortId, newLink)
+ */
+app.get('/demoUpdate', (req, res) => {
+  const { shortId, newLink } = req.query;
+  if (!shortId || !newLink) {
+    return res.status(400).send('Please provide ?shortId= and ?newLink=');
+  }
+  try {
+    const updated = shortener.updateLink(shortId, newLink);
+    if (updated) {
+      res.send(`Updated shortId="${shortId}" => "${newLink}"`);
+    } else {
+      res.send(`shortId="${shortId}" not found. Nothing updated.`);
+    }
+  } catch (error) {
+    res.status(400).send(`Error: ${error.message}`);
+  }
+});
+
+/**
+ * GET /demoList
+ * Возвращает JSON со всеми короткими ссылками
+ */
+app.get('/demoList', (req, res) => {
+  const allLinks = shortener.listAllLinks();
+  res.json(allLinks);
+});
+
+// --------------------------
 // Запускаем сервер
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// --------------------------
+
+app.listen(3000, () => {
+  console.log('Demo server listening on port 3000!');
+  console.log('Try accessing:');
+  console.log('  http://localhost:3000/demoAdd?url=http://localhost:3000/test');
+  console.log('  http://localhost:3000/demoGet?shortId=xxxxx');
+  console.log('  http://localhost:3000/demoRemove?shortId=xxxxx');
+  console.log('  http://localhost:3000/demoUpdate?shortId=xxxxx&newLink=...');
+  console.log('  http://localhost:3000/demoList');
 });
