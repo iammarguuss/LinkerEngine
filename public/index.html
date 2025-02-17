@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Shortener Test</title>
+</head>
+<body>
+  <h1>Shortener Test</h1>
+  <p>Допустим, разрешены ссылки только на домен <strong>localhost:3000</strong>.</p>
+
+  <label for="longLink">Введите ссылку (например, http://localhost:3000/page1): </label>
+  <input type="text" id="longLink" value="http://localhost:3000/page1" />
+  <button id="btnShorten">Сократить</button>
+
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('btnShorten').addEventListener('click', async () => {
+      const longLinkValue = document.getElementById('longLink').value.trim();
+      if (!longLinkValue) {
+        alert('Введите ссылку!');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/addLink', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ longLink: longLinkValue })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          document.getElementById('result').innerHTML = `
+            <p>Успешно! Короткая ссылка: <a href="${data.shortUrl}" target="_blank">${data.shortUrl}</a></p>
+          `;
+        } else {
+          document.getElementById('result').innerHTML = `
+            <p style="color:red;">Ошибка: ${data.error}</p>
+          `;
+        }
+      } catch (err) {
+        document.getElementById('result').innerHTML = `
+          <p style="color:red;">Ошибка: ${err.message}</p>
+        `;
+      }
+    });
+  </script>
+</body>
+</html>
